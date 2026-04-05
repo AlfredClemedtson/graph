@@ -143,6 +143,7 @@
 pub mod afforest;
 pub mod coloring;
 pub mod dss;
+pub mod modularity;
 pub mod page_rank;
 pub mod prelude;
 pub mod sssp;

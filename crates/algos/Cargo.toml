@@ -21,9 +21,15 @@ num-format.workspace = true
 nanorand.workspace = true
 rayon.workspace = true
 serde = { workspace = true, optional = true }
+rand = "0.8.5"
 
 [dev-dependencies]
+criterion.workspace = true
 env_logger.workspace = true
 graph_builder = { path = "../builder", version = "^0.4.1", features = ["gdl"] }
 log.workspace = true
 polars.workspace = true
+
+[[bench]]
+name = "modularity"
+harness = false
