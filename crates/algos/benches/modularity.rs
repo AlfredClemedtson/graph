@@ -31,7 +31,7 @@ fn bench_example(c: &mut Criterion) {
                 //     .build();
                 let df: DataFrame = LazyFrame::scan_parquet(
                     PlRefPath::from(
-                        "/Users/alfred/proj/louvain/graphs/power_law_n10000_d10.parquet",
+                        "/Users/alfred/proj/louvain/graphs/power_law_n100000_d10.parquet",
                     ),
                     Default::default(),
                 )
@@ -63,7 +63,7 @@ fn bench_example(c: &mut Criterion) {
             },
             |graph| {
                 black_box({
-                    let communities = local_modularity_optimization(&graph, 10, 0.);
+                    let (communities, _) = local_modularity_optimization(&graph, 20, 0.);
                     let q = modularity(&graph, &communities);
                     println!("Modularity: {}", q)
                 });
