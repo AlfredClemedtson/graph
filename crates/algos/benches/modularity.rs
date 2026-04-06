@@ -1,10 +1,9 @@
-use std::iter::zip;
-use std::time::Duration;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, SamplingMode};
-use polars::prelude::{DataFrame, LazyFrame};
 use graph::modularity::local_modularity_optimization;
 use graph_builder::{CsrLayout, GraphBuilder, UndirectedCsrGraph};
-use graph_builder::prelude::EdgeListInput;
+use polars::prelude::{DataFrame, LazyFrame, PlRefPath};
+use std::iter::zip;
+use std::time::Duration;
 
 fn bench_example(c: &mut Criterion) {
     let mut group = c.benchmark_group("example");
@@ -31,27 +30,41 @@ fn bench_example(c: &mut Criterion) {
                 //     }))
                 //     .build();
                 let df: DataFrame = LazyFrame::scan_parquet(
-                        "~/proj/louvain/graphs/power_law_n10000_d10.parquet",
-                        Default::default())
-                    .collect()?;
+                    PlRefPath::from(
+                        "/Users/alfred/proj/louvain/graphs/power_law_n10000_d10.parquet",
+                    ),
+                    Default::default(),
+                )
+                .unwrap()
+                .collect()
+                .unwrap();
 
                 let edges_with_values: Vec<(u64, u64, f64)> = zip(
-                    df.column("sourceNodeIds")?.u64()?,
-                    df.columns("targetNodeIds")?.u64()?,
-                ).map(
-                    |(s, t)| (s, t, 1.)
-                );
-
+                    df.column("sourceNodeId")
+                        .unwrap()
+                        .i64()
+                        .unwrap()
+                        .into_no_null_iter(),
+                    df.column("targetNodeId")
+                        .unwrap()
+                        .i64()
+                        .unwrap()
+                        .into_no_null_iter(),
+                )
+                .map(|(s, t)| (s as u64, t as u64, 1.))
+                .collect();
+                println!("read!");
                 let graph: UndirectedCsrGraph<u64, _, f64> = GraphBuilder::new()
                     .csr_layout(CsrLayout::Deduplicated)
                     .edges_with_values(edges_with_values)
                     .build();
+                println!("built!");
                 graph
             },
             |graph| {
                 black_box(local_modularity_optimization(&graph));
             },
-            BatchSize::PerIteration
+            BatchSize::PerIteration,
         );
     });
 }

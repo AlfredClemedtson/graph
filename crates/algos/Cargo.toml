@@ -28,7 +28,8 @@ criterion.workspace = true
 env_logger.workspace = true
 graph_builder = { path = "../builder", version = "^0.4.1", features = ["gdl"] }
 log.workspace = true
-polars.workspace = true
+#polars.workspace = true
+polars = {version = "0.53.0", default-features = true, features = ["lazy", "parquet"]}
 
 [[bench]]
 name = "modularity"

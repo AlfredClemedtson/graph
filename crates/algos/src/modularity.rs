@@ -1,8 +1,7 @@
 use graph_builder::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::mem::replace;
 
-const IMPROVEMENT_THRESHOLD: f64 = 0.0001;
+const MAX_ITERATIONS: u32 = 20;
 
 pub fn local_modularity_optimization<NI, G>(graph: &G) -> Vec<usize>
 where
@@ -19,36 +18,39 @@ where
         })
         .collect::<Vec<_>>();
     let mut weighted_degree_of_community = weighted_degree.clone();
-    let mut communities = (0..node_count).collect();
+    let total_edge_weight: f64 = weighted_degree.iter().sum();
+    let mut communities: Vec<_> = (0..node_count).collect();
     let mut counter = 0;
-    loop {
-        let mut total_diff = 0f64;
+    let mut acc_diffs = 0.;
+    let q = modularity(graph, &communities);
+    println!("Iterations: {}, Modularity: {}, Diffs: {}, Acc diffs: {}", counter, q, 0., acc_diffs);
+    for _ in 0..MAX_ITERATIONS {
+        let mut diffs = 0.;
         for u in 0..node_count {
-            //process nodes of the same color in parallel
+            let old_c = communities[u];
             match best_community(
                 graph,
                 &communities,
                 &weighted_degree_of_community,
                 &weighted_degree,
-                NI::new(u),
+                total_edge_weight,
+                NI::new(u)
             ) {
                 Some((new_c, diff)) => {
-                    let old_c = replace(&mut communities[u], new_c);
+                    diffs += diff;
+                    communities[u] = new_c;
                     weighted_degree_of_community[new_c] += weighted_degree[u];
                     weighted_degree_of_community[old_c] -= weighted_degree[u];
-                    total_diff += diff;
-                }
+                },
                 None => {}
             }
         }
-        if total_diff > IMPROVEMENT_THRESHOLD {
-            counter += 1;
-            continue;
-        }
+        counter += 1;
         let q = modularity(graph, &communities);
-        println!("Iterations: {}, Modularity: {}", counter, q);
-        return communities;
+        acc_diffs += diffs;
+        println!("Iterations: {}, Modularity: {}, Diffs: {}, Acc diffs: {}", counter, q, diffs, acc_diffs);
     }
+    communities
 }
 
 fn modularity<NI, G>(graph: &G, communities: &Vec<usize>) -> f64
@@ -66,7 +68,20 @@ where
             sets
         },
     );
-    let edge_count = graph.edge_count().index() as f64;
+    let node_count = graph.node_count().index();
+    let total_edge_weight: f64 = (0..node_count)
+        .map(|u| {
+            graph
+                .neighbors_with_values(NI::new(u))
+                .map(
+                    |&Target {
+                         target: _,
+                         value: weight,
+                     }| weight,
+                )
+                .sum::<f64>()
+        })
+        .sum();
     grouped_communities
         .iter()
         .map(|(c, nodes)| {
@@ -84,51 +99,47 @@ where
                     }
                 }
             }
-            sum_in_c / (2. * edge_count) - (sum_tot / (2. * edge_count)).powi(2)
+            sum_in_c / total_edge_weight - (sum_tot / total_edge_weight).powi(2)
         })
         .sum()
 }
+
 fn best_community<NI, G>(
     graph: &G,
     communities: &Vec<usize>,
-    tot: &Vec<f64>,
-    wdeg: &Vec<f64>,
+    sum_k_c: &Vec<f64>,
+    k: &Vec<f64>,
+    sum_k: f64,
     u: NI,
 ) -> Option<(usize, f64)>
 where
     NI: Idx,
     G: Graph<NI> + UndirectedNeighborsWithValues<NI, f64>,
 {
-    let one_over_2m = 1. / graph.edge_count().index() as f64; //compute once instead
-
-    let mut ku_in = HashMap::new();
-    for &Target {
-        target: v,
-        value: weight,
-    } in graph.neighbors_with_values(u)
-    {
-        let c = communities[v.index()];
-        *ku_in.entry(c).or_insert(0f64) += weight;
-    }
     let old_c = communities[u.index()];
-    let ku_in_c = *ku_in.get(&old_c).unwrap_or(&0f64);
-    let old_dq = delta_q(one_over_2m, ku_in_c, tot[old_c], wdeg[u.index()]);
-    ku_in
+    let k_u = k[u.index()];
+    let mut k_u_in: HashMap<usize, f64> = HashMap::from_iter(vec![(old_c, 0f64)].into_iter());
+    for &Target { target: v, value: w} in graph.neighbors_with_values(u) {
+        if v == u { continue; }
+        let c = communities[v.index()];
+        *k_u_in.entry(c).or_insert(0f64) += w;
+    }
+    let k_u_in_old_c = *k_u_in.get(&old_c).unwrap();
+    k_u_in
         .into_iter()
-        .map(|(c, ku_in_c)| (c, delta_q(one_over_2m, ku_in_c, tot[c], wdeg[u.index()])))
-        .filter(|&(_, dq): &(usize, f64)| dq > old_dq)
+        .map(|(c, k_u_in_c)| {
+            let dq = 2. / sum_k * (k_u_in_c - k_u_in_old_c + (k_u / sum_k) * (sum_k_c[old_c] - sum_k_c[c] - k_u));
+            (c, dq)
+        })
+        .filter(|(_, dq)| *dq > 0.)
         .max_by(|(_, dq1), (_, dq2)| dq1.total_cmp(dq2))
-        .map(|(c, dq)| (c, dq - old_dq))
 }
 
-fn delta_q(one_over_2m: f64, ku_in_c: f64, tot_c: f64, wdeg_u: f64) -> f64 {
-    2. * one_over_2m * (ku_in_c - one_over_2m * tot_c * wdeg_u)
-}
 
 pub mod test {
 
-    use graph_builder::{GraphBuilder, UndirectedCsrGraph};
     use crate::modularity::local_modularity_optimization;
+    use graph_builder::{GraphBuilder, UndirectedCsrGraph};
 
     #[test]
     fn test_modularity() {
@@ -159,7 +170,7 @@ pub mod test {
                 .enumerate()
                 .filter_map(|(i, c)| (*c == result[3]).then_some(i))
                 .collect::<Vec<_>>(),
-            vec![3,4]
+            vec![3, 4]
         );
         println!("{:?}", result);
     }
