@@ -1,15 +1,14 @@
 use graph_builder::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-const MAX_ITERATIONS: u32 = 20;
 
-pub fn local_modularity_optimization<NI, G>(graph: &G) -> Vec<usize>
+pub fn local_modularity_optimization<NI, G>(graph: &G, max_iterations: u32, improvement_threshold: f64) -> Vec<usize>
 where
     NI: Idx,
     G: Graph<NI> + UndirectedNeighborsWithValues<NI, f64>,
 {
     let node_count = graph.node_count().index();
-    let weighted_degree = (0..node_count) //can be parallelized
+    let k = (0..node_count) //can be parallelized
         .map(|u| {
             graph
                 .neighbors_with_values(NI::new(u))
@@ -17,43 +16,41 @@ where
                 .sum()
         })
         .collect::<Vec<_>>();
-    let mut weighted_degree_of_community = weighted_degree.clone();
-    let total_edge_weight: f64 = weighted_degree.iter().sum();
+    let mut sigma = k.clone();
+    let m = k.iter().sum::<f64>() / 2.;
+
     let mut communities: Vec<_> = (0..node_count).collect();
-    let mut counter = 0;
-    let mut acc_diffs = 0.;
-    let q = modularity(graph, &communities);
-    println!("Iterations: {}, Modularity: {}, Diffs: {}, Acc diffs: {}", counter, q, 0., acc_diffs);
-    for _ in 0..MAX_ITERATIONS {
-        let mut diffs = 0.;
+
+    let mut q = modularity(graph, &communities);
+    for i in 0..max_iterations {
+        let mut total_diff = 0.;
         for u in 0..node_count {
             let old_c = communities[u];
             match best_community(
                 graph,
                 &communities,
-                &weighted_degree_of_community,
-                &weighted_degree,
-                total_edge_weight,
+                &sigma,
+                &k,
+                m,
                 NI::new(u)
             ) {
                 Some((new_c, diff)) => {
-                    diffs += diff;
+                    total_diff += diff;
                     communities[u] = new_c;
-                    weighted_degree_of_community[new_c] += weighted_degree[u];
-                    weighted_degree_of_community[old_c] -= weighted_degree[u];
+                    sigma[new_c] += k[u];
+                    sigma[old_c] -= k[u];
                 },
                 None => {}
             }
         }
-        counter += 1;
-        let q = modularity(graph, &communities);
-        acc_diffs += diffs;
-        println!("Iterations: {}, Modularity: {}, Diffs: {}, Acc diffs: {}", counter, q, diffs, acc_diffs);
+        // let q = modularity(graph, &communities);
+        q += total_diff;
+        println!("Iterations: {}, Modularity: {}, Diffs: {}", i, q, total_diff);
     }
     communities
 }
 
-fn modularity<NI, G>(graph: &G, communities: &Vec<usize>) -> f64
+pub fn modularity<NI, G>(graph: &G, communities: &Vec<usize>) -> f64
 where
     NI: Idx,
     G: Graph<NI> + UndirectedNeighborsWithValues<NI, f64>,
@@ -107,9 +104,9 @@ where
 fn best_community<NI, G>(
     graph: &G,
     communities: &Vec<usize>,
-    sum_k_c: &Vec<f64>,
+    sigma: &Vec<f64>,
     k: &Vec<f64>,
-    sum_k: f64,
+    m: f64,
     u: NI,
 ) -> Option<(usize, f64)>
 where
@@ -128,7 +125,7 @@ where
     k_u_in
         .into_iter()
         .map(|(c, k_u_in_c)| {
-            let dq = 2. / sum_k * (k_u_in_c - k_u_in_old_c + (k_u / sum_k) * (sum_k_c[old_c] - sum_k_c[c] - k_u));
+            let dq = 1. / m * (k_u_in_c - k_u_in_old_c + k_u / (2. * m) * (sigma[old_c] - sigma[c] - k_u));
             (c, dq)
         })
         .filter(|(_, dq)| *dq > 0.)
@@ -146,7 +143,7 @@ pub mod test {
         let graph: UndirectedCsrGraph<usize, _, f64> = GraphBuilder::new()
             .edges_with_values(vec![(0, 1, 1.), (1, 0, 1.), (3, 4, 1.)])
             .build();
-        let result = local_modularity_optimization(&graph);
+        let result = local_modularity_optimization(&graph, 10, 0.);
         assert_eq!(result[0], result[1]);
         assert_eq!(
             result

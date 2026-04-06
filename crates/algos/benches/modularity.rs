@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, SamplingMode};
-use graph::modularity::local_modularity_optimization;
+use graph::modularity::{local_modularity_optimization, modularity};
 use graph_builder::{CsrLayout, GraphBuilder, UndirectedCsrGraph};
 use polars::prelude::{DataFrame, LazyFrame, PlRefPath};
 use std::iter::zip;
@@ -62,7 +62,11 @@ fn bench_example(c: &mut Criterion) {
                 graph
             },
             |graph| {
-                black_box(local_modularity_optimization(&graph));
+                black_box({
+                    let communities = local_modularity_optimization(&graph, 10, 0.);
+                    let q = modularity(&graph, &communities);
+                    println!("Modularity: {}", q)
+                });
             },
             BatchSize::PerIteration,
         );
